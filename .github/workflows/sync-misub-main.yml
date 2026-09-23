@@ -1,0 +1,34 @@
+name: Auto Sync Upstream to main
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 每天 UTC 1:00 运行（比 my-deploy 的同步早一小时）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+      - name: Merge upstream main
+        run: |
+          git remote add upstream https://github.com/Aihuangshu/misub.git
+          git fetch upstream main
+          git merge upstream/main --no-edit
+
+      - name: Push if changed
+        run: git push origin main
