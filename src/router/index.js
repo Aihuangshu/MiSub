@@ -94,7 +94,8 @@ const routes = [
 ];
 
 const router = createRouter({
-    history: createWebHistory(),
+    history: createWebHistory('/misub/'),
+    // 添加此行，确保路由在 /misub/ 下正常工作
     routes,
     scrollBehavior(to, from, savedPosition) {
         if (savedPosition) {
