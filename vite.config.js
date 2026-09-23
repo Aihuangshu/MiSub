@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+    base: '/misub/',
+    // 添加此行，确保所有资源路径都从 /misub/ 开始
     plugins: [
         vue(),
         tailwindcss(),
