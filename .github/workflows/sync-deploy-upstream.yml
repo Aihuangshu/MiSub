@@ -1,0 +1,67 @@
+name: Auto Sync Upstream to deploy
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天 UTC 2:00 自动运行
+  workflow_dispatch:        # 支持在 Actions 页面手动触发
+
+permissions:
+  contents: write           # 允许推送分支
+  issues: write             # 允许创建 Issue
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: deploy                     # 检出定制分支
+          fetch-depth: 0                     # 拉取完整历史，避免变基失败
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+      - name: Fetch upstream and try rebase
+        id: sync
+        run: |
+          git remote add upstream https://github.com/Aihuangshu/misub.git
+          git fetch upstream main
+          if git rebase upstream/main; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=conflict" >> $GITHUB_OUTPUT
+            git rebase --abort || true
+          fi
+
+      - name: Push if rebase succeeded
+        if: steps.sync.outputs.status == 'success'
+        run: git push --force-with-lease origin deploy
+
+      - name: Create issue if conflict
+        if: steps.sync.outputs.status == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              '自动变基失败，请手动解决 `deploy` 与上游 `main` 的冲突。',
+              '',
+              '**本地操作步骤：**',
+              '1. `git checkout deploy && git pull`',
+              '2. `git remote add upstream https://github.com/Aihuangshu/misub.git`（如已添加可跳过）',
+              '3. `git fetch upstream main`',
+              '4. `git rebase upstream/main`',
+              '5. 解决冲突后执行 `git add . && git rebase --continue`',
+              '6. `git push --force-with-lease origin deploy`',
+              '',
+              '解决后请关闭本 Issue。'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ 自动变基失败：deploy 与上游 main 冲突',
+              body: body
+            });
