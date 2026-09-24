@@ -33,15 +33,25 @@ def replace_line(path, prefix, new_line):
             return i
     raise SystemExit("line anchor not found: " + path)
 
-def replace_line_after(path, start_index, contains, new_line):
+def replace_profile_links(path, normal_line, clash_line=None):
     p = Path(path)
     lines = p.read_text().splitlines()
-    for i in range(start_index + 1, len(lines)):
-        if lines[i].strip().startswith("const link = ") and contains in lines[i]:
-            lines[i] = new_line
-            p.write_text("\n".join(lines) + "\n")
-            return
-    raise SystemExit("secondary line anchor not found: " + path)
+    count = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("const link = " + chr(96)):
+            continue
+        if "${window.location.origin}/${token}/${identifier}" not in line:
+            continue
+        if clash_line and "?target=clash&builtin=1" in line:
+            lines[i] = clash_line
+        else:
+            lines[i] = normal_line
+        count += 1
+    if count == 0:
+        raise SystemExit("profile link anchor not found: " + path)
+    p.write_text("\n".join(lines) + "\n")
+    return count
 
 replace_once(
     "src/router/index.js",
@@ -98,29 +108,14 @@ replace_once(
     "import { t } from '../i18n/index.js';\nimport { withAppBasePath } from '../lib/http.js';",
 )
 
-first_profile_link = replace_line(
+replace_profile_links(
     "src/composables/useProfiles.js",
-    "const link = " + chr(96),
     "        const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
-)
-
-replace_line_after(
-    "src/composables/useProfiles.js",
-    first_profile_link,
-    "?target=clash&builtin=1",
     "        const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier + '?target=clash&builtin=1');",
 )
 
-first_public_profile_link = replace_line(
+replace_profile_links(
     "src/views/PublicProfilesView.vue",
-    "const link = " + chr(96),
-    "            const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
-)
-
-replace_line_after(
-    "src/views/PublicProfilesView.vue",
-    first_public_profile_link,
-    "identifier}",
     "            const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
 )
 
