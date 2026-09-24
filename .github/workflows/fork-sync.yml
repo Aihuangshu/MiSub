@@ -66,4 +66,4 @@ jobs:
 
           git commit -m "Apply local Worker overlay"
           git push origin main
-          echo "â main y.. Upstream/main + Worker overlay"
+          echo "Worker overlay applied to main."
