@@ -120,7 +120,7 @@ first_public_profile_link = replace_line(
 replace_line_after(
     "src/views/PublicProfilesView.vue",
     first_public_profile_link,
-    "/" + "token" + "/" + "identifier",
+    "identifier}",
     "            const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
 )
 
