@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+restore() {
+  git checkout -- \
+    src/router/index.js \
+    src/lib/http.js \
+    src/lib/api.js \
+    src/composables/useProfiles.js \
+    src/views/PublicProfilesView.vue \
+    src/components/modals/CopyLinkModal.vue \
+    index.html
+}
+trap restore EXIT
+
 python3 - <<'PY'
 from pathlib import Path
 
@@ -18,8 +30,18 @@ def replace_line(path, prefix, new_line):
         if line.strip().startswith(prefix):
             lines[i] = new_line
             p.write_text("\n".join(lines) + "\n")
-            return
+            return i
     raise SystemExit("line anchor not found: " + path)
+
+def replace_line_after(path, start_index, contains, new_line):
+    p = Path(path)
+    lines = p.read_text().splitlines()
+    for i in range(start_index + 1, len(lines)):
+        if lines[i].strip().startswith("const link = ") and contains in lines[i]:
+            lines[i] = new_line
+            p.write_text("\n".join(lines) + "\n")
+            return
+    raise SystemExit("secondary line anchor not found: " + path)
 
 replace_once(
     "src/router/index.js",
@@ -76,10 +98,17 @@ replace_once(
     "import { t } from '../i18n/index.js';\nimport { withAppBasePath } from '../lib/http.js';",
 )
 
-replace_line(
+first_profile_link = replace_line(
     "src/composables/useProfiles.js",
     "const link = " + chr(96),
     "        const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
+)
+
+replace_line_after(
+    "src/composables/useProfiles.js",
+    first_profile_link,
+    "?target=clash&builtin=1",
+    "        const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier + '?target=clash&builtin=1');",
 )
 
 replace_line(
@@ -115,14 +144,5 @@ PY
 
 rm -rf dist
 npx vite build --base=/misub/
-
-git checkout -- \
-  src/router/index.js \
-  src/lib/http.js \
-  src/lib/api.js \
-  src/composables/useProfiles.js \
-  src/views/PublicProfilesView.vue \
-  src/components/modals/CopyLinkModal.vue \
-  index.html
 
 echo "MiSub Worker overlay build completed."
