@@ -111,9 +111,16 @@ replace_line_after(
     "        const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier + '?target=clash&builtin=1');",
 )
 
-replace_line(
+first_public_profile_link = replace_line(
     "src/views/PublicProfilesView.vue",
     "const link = " + chr(96),
+    "            const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
+)
+
+replace_line_after(
+    "src/views/PublicProfilesView.vue",
+    first_public_profile_link,
+    "/" + token + "/" + identifier,
     "            const link = window.location.origin + withAppBasePath('/' + token + '/' + identifier);",
 )
 
