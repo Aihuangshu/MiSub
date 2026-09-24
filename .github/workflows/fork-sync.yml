@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout fork
-        uses: actions/checkout v4
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.SYNC_PAT != '' && secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -59,8 +59,8 @@ jobs:
           done
 
           git add "${OVERLAY_FILES[@]}"
-           if git diff --cached --quiet; then
-            echo "â Upstream æ¶å¹ Worker overlay åç¨ã"
+          if git diff --cached --quiet; then
+            echo "✅ Upstream 与 Worker overlay 均无变化。"
             exit 0
           fi
 
