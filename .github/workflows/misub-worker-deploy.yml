@@ -1,6 +1,8 @@
 name: MiSub Worker Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_run:
     workflows: ["Fork Sync"]
     types: [completed]
