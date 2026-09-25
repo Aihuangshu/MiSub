@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           token: ${{ secrets.SYNC_PAT != '' && secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -65,5 +65,5 @@ jobs:
           fi
 
           git commit -m "Apply local Worker overlay"
-          git push origin main
+          git push --force-with-lease origin main
           echo "Worker overlay applied to main."
