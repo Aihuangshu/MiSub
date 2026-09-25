@@ -12,7 +12,7 @@ permissions:
 jobs:
   sync_with_upstream:
     name: Sync upstream + reapply Worker overlay
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event.repository.fork }}
 
     steps:
@@ -48,6 +48,7 @@ jobs:
 
           OVERLAY_FILES=(
             "worker-runtime/worker.js"
+            "worker-runtime/wrangler.toml"
             "scripts/build-misub-worker.sh"
             ".github/workflows/fork-sync.yml"
             ".github/workflows/misub-worker-deploy.yml"
