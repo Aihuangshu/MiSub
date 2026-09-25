@@ -21,8 +21,3 @@ run_worker_first = true
 [[kv_namespaces]]
 binding = "MISUB_KV"
 id = "9fcc261f2c5544499f9726f48d6c7539"
-
-[[d1_databases]]
-binding = "MISUB_DB"
-database_name = "misub"
-database_id = "81d293df-fe91-429b-9c86-199712e571da"
