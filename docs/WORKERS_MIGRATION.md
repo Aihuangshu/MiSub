@@ -12,12 +12,12 @@
 
 MiSub 只占：
 
-- `<你的域名>/misub`
-- `<你的域名>/misub/*`
+- `nua.qzz.io/misub`
+- `nua.qzz.io/misub/*`
 
 未来根项目可以占：
 
-- `<你的域名>/*`
+- `nua.qzz.io/*`
 
 CF-Workers-SUB 独立占：
 
