@@ -18,13 +18,13 @@ jobs:
 
     steps:
       - name: Checkout synchronized main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -35,57 +35,17 @@ jobs:
       - name: Build MiSub Worker bundle
         run: bash scripts/build-misub-worker.sh
 
-      - name: Prepare Wrangler config
-        env:
-          CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
-          MISUB_ROUTE_HOST: ${{ vars.MISUB_ROUTE_HOST }}
-          MISUB_ZONE_NAME: ${{ vars.MISUB_ZONE_NAME }}
-          MISUB_KV_NAMESPACE_ID: ${{ secrets.MISUB_KV_NAMESPACE_ID }}
-          MISUB_D1_DATABASE_ID: ${{ secrets.MISUB_D1_DATABASE_ID }}
+      - name: Verify Worker build
         run: |
           set -euo pipefail
-          test -n "${CF_ACCOUNT_ID:-}" || { echo "::error::缺少 repository variable CF_ACCOUNT_ID"; exit 1; }
-          test -n "${MISUB_ROUTE_HOST:-}" || { echo "::error::缺少 repository variable MISUB_ROUTE_HOST"; exit 1; }
-          test -n "${MISUB_ZONE_NAME:-}" || { echo "::error::缺少 repository variable MISUB_ZONE_NAME"; exit 1; }
-          test -n "${MISUB_KV_NAMESPACE_ID:-}" || { echo "::error::缺少 secret MISUB_KV_NAMESPACE_ID"; exit 1; }
-
-          cat > worker-runtime/wrangler.toml <<EOF
-          name = "misub-worker"
-          main = "./worker.js"
-          compatibility_date = "2026-09-24"
-          compatibility_flags = ["nodejs_compat"]
-          workers_dev = false
-
-          routes = [
-            { pattern = "${MISUB_ROUTE_HOST}/misub", zone_name = "${MISUB_ZONE_NAME}" },
-            { pattern = "${MISUB_ROUTE_HOST}/misub/*", zone_name = "${MISUB_ZONE_NAME}" }
-          ]
-
-          [assets]
-          directory = "../dist"
-          binding = "ASSETS"
-          not_found_handling = "single-page-application"
-          run_worker_first = true
-
-          [[kv_namespaces]]
-          binding = "MISUB_KV"
-          id = "${MISUB_KV_NAMESPACE_ID}"
-          EOF
-
-          if [ -n "${MISUB_D1_DATABASE_ID:-}" ]; then
-            cat >> worker-runtime/wrangler.toml <<EOF
-
-          [[d1_databases]]
-          binding = "MISUB_DB"
-          database_name = "misub"
-          database_id = "${MISUB_D1_DATABASE_ID}"
-          EOF
-          fi
+          test -f dist/index.html
+          grep -q "/misub/" dist/index.html
+          echo "MiSub Worker build verified."
 
       - name: Deploy Worker + Routes
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy --config worker-runtime/wrangler.toml
 
       - name: Verify build artifacts
