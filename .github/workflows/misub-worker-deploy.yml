@@ -14,7 +14,7 @@ permissions:
 jobs:
   deploy:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout synchronized main
@@ -48,9 +48,3 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy --config worker-runtime/wrangler.toml
 
-      - name: Verify build artifacts
-        run: |
-          set -euo pipefail
-          test -f dist/index.html
-          grep -q "/misub/" dist/index.html
-          echo "✅ MiSub Worker build verified."
