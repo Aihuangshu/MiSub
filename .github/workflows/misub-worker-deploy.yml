@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: misub-worker-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
@@ -52,10 +56,7 @@ jobs:
           project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/misub"
           domains_url="${project_url}/domains"
 
-          project_status="$(curl -sS -o /tmp/misub-pages.json -w '%{http_code}' \
-            "${project_url}" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json")"
+          project_status="$(curl -sS -o /tmp/misub-pages.json -w '%{http_code}'             "${project_url}"             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             -H "Content-Type: application/json")"
 
           if [ "${project_status}" = "404" ]; then
             echo "Legacy Pages project 'misub' not found; skipping legacy binding check."
@@ -64,10 +65,7 @@ jobs:
             cat /tmp/misub-pages.json
             exit 1
           else
-            domains_status="$(curl -sS -o /tmp/misub-pages-domains.json -w '%{http_code}' \
-              "${domains_url}" \
-              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-              -H "Content-Type: application/json")"
+            domains_status="$(curl -sS -o /tmp/misub-pages-domains.json -w '%{http_code}'               "${domains_url}"               -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"               -H "Content-Type: application/json")"
 
             if [ "${domains_status}" != "200" ]; then
               echo "Cloudflare Pages domains API returned HTTP ${domains_status}."
@@ -75,90 +73,49 @@ jobs:
               exit 1
             fi
 
-            python3 - <<'PY'
-            import json
-            import re
-            from pathlib import Path
+            legacy_kv="$(jq -r '.result.deployment_configs.production.kv_namespaces.MISUB_KV.namespace_id // empty' /tmp/misub-pages.json)"
+            legacy_d1="$(jq -r '.result.deployment_configs.production.d1_databases.MISUB_DB.id // empty' /tmp/misub-pages.json)"
+            worker_kv="$(grep -A1 'binding = "MISUB_KV"' worker-runtime/wrangler.toml | tail -n1 | sed -n 's/.*"\\([^"]*\\)".*/\\1/p')"
+            worker_d1="$(grep -A1 'binding = "MISUB_DB"' worker-runtime/wrangler.toml | tail -n1 | sed -n 's/.*"\\([^"]*\\)".*/\\1/p')"
 
-            project = json.loads(Path("/tmp/misub-pages.json").read_text())
-            domains = json.loads(Path("/tmp/misub-pages-domains.json").read_text())
+            echo "Legacy Pages project: misub"
+            echo "Legacy Pages KV MISUB_KV: ${legacy_kv:-<none>}"
+            echo "Worker KV MISUB_KV:      ${worker_kv:-<none>}"
+            echo "Legacy Pages D1 MISUB_DB: ${legacy_d1:-<none>}"
+            echo "Worker D1 MISUB_DB:       ${worker_d1:-<none>}"
+            echo "Legacy Pages domains:"
+            jq -r '.result[]?.name // empty' /tmp/misub-pages-domains.json | sed 's/^/  - /' || true
 
-            result = project.get("result") or {}
-            prod = (result.get("deployment_configs") or {}).get("production") or {}
-            kv = ((prod.get("kv_namespaces") or {}).get("MISUB_KV") or {}).get("namespace_id")
-            d1 = ((prod.get("d1_databases") or {}).get("MISUB_DB") or {}).get("id")
+            if [ "${legacy_kv}" != "${worker_kv}" ]; then
+              echo "KV mismatch: Worker is not using the legacy Pages production MISUB_KV namespace."
+              exit 1
+            fi
 
-            wrangler = Path("worker-runtime/wrangler.toml").read_text()
-            kv_match = re.search(r'(?ms)^\\[\\[kv_namespaces\\]\\].*?^id\\s*=\\s*"([^"]+)"', wrangler)
-            d1_match = re.search(r'(?ms)^\\[\\[d1_databases\\]\\].*?^database_id\\s*=\\s*"([^"]+)"', wrangler)
+            if [ "${legacy_d1}" != "${worker_d1}" ]; then
+              echo "D1 mismatch: Worker D1 binding differs from legacy Pages production."
+              exit 1
+            fi
 
-            if not kv_match:
-                raise SystemExit("Unable to parse Worker KV ID from wrangler.toml")
-
-            worker_kv = kv_match.group(1)
-            worker_d1 = d1_match.group(1) if d1_match else None
-            domain_names = [item.get("name") for item in (domains.get("result") or []) if item.get("name")]
-
-            print(f"Legacy Pages project: {result.get('name', 'misub')}")
-            print(f"Legacy Pages KV MISUB_KV: {kv}")
-            print(f"Worker KV MISUB_KV:      {worker_kv}")
-            print(f"Legacy Pages D1 MISUB_DB: {d1}")
-            print(f"Worker D1 MISUB_DB:       {worker_d1}")
-            print("Legacy Pages domains:")
-            for name in domain_names:
-                print(f"  - {name}")
-
-            if kv != worker_kv:
-                raise SystemExit("KV mismatch: Worker is not using the legacy Pages production MISUB_KV namespace.")
-            if d1 != worker_d1:
-                raise SystemExit("D1 mismatch: Worker D1 binding differs from legacy Pages production.")
-            print("Legacy Pages storage bindings match Worker configuration.")
-            PY
-
-          zone_status="$(curl -sS -o /tmp/zone.json -w '%{http_code}' \
-            "https://api.cloudflare.com/client/v4/zones?name=nua.qzz.io" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json")"
-
-          if [ "${zone_status}" = "200" ]; then
-            python3 - <<'PY'
-            import json
-            from pathlib import Path
-
-            data = json.loads(Path("/tmp/zone.json").read_text())
-            zones = data.get("result") or []
-            if zones:
-                zone_id = zones[0].get("id")
-                print(f"Zone nua.qzz.io ID: {zone_id}")
-                Path("/tmp/zone-id").write_text(zone_id or "")
-            else:
-                print("Zone nua.qzz.io was not returned by Cloudflare API.")
-            PY
-          else
-            echo "Cloudflare Zones API returned HTTP ${zone_status}; route diagnostics skipped."
+            echo "Legacy Pages storage bindings match Worker configuration."
           fi
 
-          if [ -s /tmp/zone-id ]; then
-            zone_id="$(cat /tmp/zone-id)"
-            routes_status="$(curl -sS -o /tmp/routes.json -w '%{http_code}' \
-              "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes" \
-              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-              -H "Content-Type: application/json")"
+          zone_status="$(curl -sS -o /tmp/zone.json -w '%{http_code}'             "https://api.cloudflare.com/client/v4/zones?name=nua.qzz.io&account.id=${CLOUDFLARE_ACCOUNT_ID}"             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             -H "Content-Type: application/json")"
 
-            if [ "${routes_status}" = "200" ]; then
-              python3 - <<'PY'
-              import json
-              from pathlib import Path
-
-              data = json.loads(Path("/tmp/routes.json").read_text())
-              routes = data.get("result") or []
-              print("Current Worker routes for nua.qzz.io:")
-              for route in routes:
-                  print(f"  - {route.get('pattern')} -> {route.get('script') or '<no script>'}")
-              PY
+          if [ "${zone_status}" = "200" ]; then
+            zone_id="$(jq -r '.result[0].id // empty' /tmp/zone.json)"
+            if [ -n "${zone_id}" ]; then
+              echo "Current Worker routes for nua.qzz.io:"
+              routes_status="$(curl -sS -o /tmp/routes.json -w '%{http_code}'                 "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes"                 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"                 -H "Content-Type: application/json")"
+              if [ "${routes_status}" = "200" ]; then
+                jq -r '.result[]? | "  - " + (.pattern // "") + " -> " + (.script // "<no script>")' /tmp/routes.json
+              else
+                echo "Workers Routes API returned HTTP ${routes_status}; route diagnostics skipped."
+              fi
             else
-              echo "Cloudflare Workers Routes API returned HTTP ${routes_status}; route diagnostics skipped."
+              echo "Zone nua.qzz.io was not returned; route diagnostics skipped."
             fi
+          else
+            echo "Zones API returned HTTP ${zone_status}; route diagnostics skipped."
           fi
 
       - name: Deploy Worker + Routes
