@@ -42,9 +42,88 @@ jobs:
           grep -q "/misub/" dist/index.html
           echo "MiSub Worker build verified."
 
+      - name: Verify legacy Pages bindings and domains
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/misub"
+          domains_url="${project_url}/domains"
+
+          project_status="$(curl -sS -o /tmp/misub-pages.json -w '%{http_code}' \
+            "${project_url}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")"
+
+          if [ "${project_status}" = "404" ]; then
+            echo "Legacy Pages project 'misub' not found; skipping legacy binding check."
+            exit 0
+          fi
+
+          if [ "${project_status}" != "200" ]; then
+            echo "Cloudflare Pages API returned HTTP ${project_status}."
+            cat /tmp/misub-pages.json
+            exit 1
+          fi
+
+          domains_status="$(curl -sS -o /tmp/misub-pages-domains.json -w '%{http_code}' \
+            "${domains_url}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")"
+
+          if [ "${domains_status}" != "200" ]; then
+            echo "Cloudflare Pages domains API returned HTTP ${domains_status}."
+            cat /tmp/misub-pages-domains.json
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          project = json.loads(Path("/tmp/misub-pages.json").read_text())
+          domains = json.loads(Path("/tmp/misub-pages-domains.json").read_text())
+
+          result = project.get("result") or {}
+          prod = (result.get("deployment_configs") or {}).get("production") or {}
+          kv = ((prod.get("kv_namespaces") or {}).get("MISUB_KV") or {}).get("namespace_id")
+          d1 = ((prod.get("d1_databases") or {}).get("MISUB_DB") or {}).get("id")
+
+          wrangler = Path("worker-runtime/wrangler.toml").read_text()
+
+          kv_match = re.search(r'(?ms)^\[\[kv_namespaces\]\].*?^id\s*=\s*"([^"]+)"', wrangler)
+          d1_match = re.search(r'(?ms)^\[\[d1_databases\]\].*?^database_id\s*=\s*"([^"]+)"', wrangler)
+
+          if not kv_match or not d1_match:
+              raise SystemExit("Unable to parse Worker KV/D1 IDs from wrangler.toml")
+
+          worker_kv = kv_match.group(1)
+          worker_d1 = d1_match.group(1)
+
+          domain_names = [item.get("name") for item in (domains.get("result") or []) if item.get("name")]
+
+          print(f"Legacy Pages project: {result.get('name', 'misub')}")
+          print(f"Legacy Pages KV MISUB_KV: {kv}")
+          print(f"Worker KV MISUB_KV:      {worker_kv}")
+          print(f"Legacy Pages D1 MISUB_DB: {d1}")
+          print(f"Worker D1 MISUB_DB:       {worker_d1}")
+          print("Legacy Pages domains:")
+          for name in domain_names:
+              print(f"  - {name}")
+
+          if kv != worker_kv:
+              raise SystemExit("KV mismatch: Worker is not using the legacy Pages production MISUB_KV namespace.")
+          if d1 != worker_d1:
+              raise SystemExit("D1 mismatch: Worker is not using the legacy Pages production MISUB_DB database.")
+
+          print("Legacy Pages production KV/D1 bindings match Worker bindings.")
+          PY
+
       - name: Deploy Worker + Routes
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy --config worker-runtime/wrangler.toml
-
