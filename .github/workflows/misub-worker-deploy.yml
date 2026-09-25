@@ -76,7 +76,7 @@ jobs:
             legacy_kv="$(jq -r '.result.deployment_configs.production.kv_namespaces.MISUB_KV.namespace_id // empty' /tmp/misub-pages.json)"
             legacy_d1="$(jq -r '.result.deployment_configs.production.d1_databases.MISUB_DB.id // empty' /tmp/misub-pages.json)"
             worker_kv="$(grep -A1 'binding = "MISUB_KV"' worker-runtime/wrangler.toml | tail -n1 | sed -n 's/.*"\\([^"]*\\)".*/\\1/p')"
-            worker_d1="$(grep -A1 'binding = "MISUB_DB"' worker-runtime/wrangler.toml | tail -n1 | sed -n 's/.*"\\([^"]*\\)".*/\\1/p')"
+            worker_d1="$(grep -A1 'binding = "MISUB_DB"' worker-runtime/wrangler.toml | tail -n1 | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' || true)"
 
             echo "Legacy Pages project: misub"
             echo "Legacy Pages KV MISUB_KV: ${legacy_kv:-<none>}"
