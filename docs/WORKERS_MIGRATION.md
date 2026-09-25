@@ -21,8 +21,8 @@ MiSub 只占：
 
 CF-Workers-SUB 独立占：
 
-- `<你的域名>/dy`
-- `<你的域名>/dy/*`
+- `nua.qzz.io/dy`
+- `nua.qzz.io/dy/*`
 
 不再需要 Gateway Worker。
 
@@ -39,18 +39,13 @@ MiSub 当前代码已经支持把管理员密码和 Cookie Secret 持久化在 K
 
 ## GitHub 配置
 
-Repository Variables：
-
-- `CF_ACCOUNT_ID`
-- `MISUB_ROUTE_HOST`
-- `MISUB_ZONE_NAME`
-
 Repository Secrets：
 
 - `CLOUDFLARE_API_TOKEN`
-- `MISUB_KV_NAMESPACE_ID`
-- `MISUB_D1_DATABASE_ID`（使用 D1 才需要）
-- `SYNC_PAT`（用于同步 workflow 文件；已有则继续使用）
+- `CLOUDFLARE_ACCOUNT_ID`
+- `SYNC_PAT`（已有则继续使用；没有时使用 GitHub Actions 自带 token）
+
+不再需要 `CF_ACCOUNT_ID`、`MISUB_ROUTE_HOST`、`MISUB_ZONE_NAME`、`MISUB_KV_NAMESPACE_ID`、`MISUB_D1_DATABASE_ID` 这些 GitHub Variables/Secrets；域名、Route、KV、D1 ID 已固定在 `worker-runtime/wrangler.toml` 中。
 
 ## 回滚
 
