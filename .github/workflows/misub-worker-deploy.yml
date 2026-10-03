@@ -1,0 +1,125 @@
+name: MiSub Worker Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["Fork Sync"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: misub-worker-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout synchronized main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build MiSub Worker bundle
+        run: bash scripts/build-misub-worker.sh
+
+      - name: Verify Worker build
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          grep -q "/misub/" dist/index.html
+          echo "MiSub Worker build verified."
+
+      - name: Verify legacy Pages bindings and current routes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/misub"
+          domains_url="${project_url}/domains"
+
+          project_status="$(curl -sS -o /tmp/misub-pages.json -w '%{http_code}'             "${project_url}"             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             -H "Content-Type: application/json")"
+
+          if [ "${project_status}" = "404" ]; then
+            echo "Legacy Pages project 'misub' not found; skipping legacy binding check."
+          elif [ "${project_status}" != "200" ]; then
+            echo "Cloudflare Pages API returned HTTP ${project_status}."
+            cat /tmp/misub-pages.json
+            exit 1
+          else
+            domains_status="$(curl -sS -o /tmp/misub-pages-domains.json -w '%{http_code}'               "${domains_url}"               -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"               -H "Content-Type: application/json")"
+
+            if [ "${domains_status}" != "200" ]; then
+              echo "Cloudflare Pages domains API returned HTTP ${domains_status}."
+              cat /tmp/misub-pages-domains.json
+              exit 1
+            fi
+
+            legacy_kv="$(jq -r '.result.deployment_configs.production.kv_namespaces.MISUB_KV.namespace_id // empty' /tmp/misub-pages.json)"
+            legacy_d1="$(jq -r '.result.deployment_configs.production.d1_databases.MISUB_DB.id // empty' /tmp/misub-pages.json)"
+            worker_kv="$(awk -F'"' '/binding = "MISUB_KV"/ {found=1; next} found && /^id[[:space:]]*=/ {print $2; exit}' worker-runtime/wrangler.toml)"
+            worker_d1="$(grep -A1 'binding = "MISUB_DB"' worker-runtime/wrangler.toml | tail -n1 | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' || true)"
+
+            echo "Legacy Pages project: misub"
+            echo "Legacy Pages KV MISUB_KV: ${legacy_kv:-<none>}"
+            echo "Worker KV MISUB_KV:      ${worker_kv:-<none>}"
+            echo "Legacy Pages D1 MISUB_DB: ${legacy_d1:-<none>}"
+            echo "Worker D1 MISUB_DB:       ${worker_d1:-<none>}"
+            echo "Legacy Pages domains:"
+            jq -r '.result[]?.name // empty' /tmp/misub-pages-domains.json | sed 's/^/  - /' || true
+
+            if [ "${legacy_kv}" != "${worker_kv}" ]; then
+              echo "KV mismatch: Worker is not using the legacy Pages production MISUB_KV namespace."
+              exit 1
+            fi
+
+            if [ "${legacy_d1}" != "${worker_d1}" ]; then
+              echo "D1 mismatch: Worker D1 binding differs from legacy Pages production."
+              exit 1
+            fi
+
+            echo "Legacy Pages storage bindings match Worker configuration."
+          fi
+
+          zone_status="$(curl -sS -o /tmp/zone.json -w '%{http_code}'             "https://api.cloudflare.com/client/v4/zones?name=nua.qzz.io&account.id=${CLOUDFLARE_ACCOUNT_ID}"             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             -H "Content-Type: application/json")"
+
+          if [ "${zone_status}" = "200" ]; then
+            zone_id="$(jq -r '.result[0].id // empty' /tmp/zone.json)"
+            if [ -n "${zone_id}" ]; then
+              echo "Current Worker routes for nua.qzz.io:"
+              routes_status="$(curl -sS -o /tmp/routes.json -w '%{http_code}'                 "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes"                 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"                 -H "Content-Type: application/json")"
+              if [ "${routes_status}" = "200" ]; then
+                jq -r '.result[]? | "  - " + (.pattern // "") + " -> " + (.script // "<no script>")' /tmp/routes.json
+              else
+                echo "Workers Routes API returned HTTP ${routes_status}; route diagnostics skipped."
+              fi
+            else
+              echo "Zone nua.qzz.io was not returned; route diagnostics skipped."
+            fi
+          else
+            echo "Zones API returned HTTP ${zone_status}; route diagnostics skipped."
+          fi
+
+      - name: Deploy Worker + Routes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config worker-runtime/wrangler.toml
