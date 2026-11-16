@@ -46,6 +46,50 @@ jobs:
           grep -q "/misub/" dist/index.html
           echo "MiSub Worker build verified."
 
+      - name: Validate Worker routes against Cloudflare zones
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          # Every route in wrangler.toml must point at an active zone in this
+          # account. A moved/inactive zone makes Wrangler upload the script and
+          # then fail on the script-level routes API with "No access to the
+          # specified resource", leaving the deployment half-applied.
+          zones_status="$(curl -sS -o /tmp/zones.json -w '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/zones?account.id=${CLOUDFLARE_ACCOUNT_ID}&per_page=50" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")"
+
+          if [ "${zones_status}" != "200" ]; then
+            echo "Zones API returned HTTP ${zones_status}; route validation failed."
+            cat /tmp/zones.json
+            exit 1
+          fi
+
+          active_zones="$(jq -r '.result[]? | select(.status == "active") | .name' /tmp/zones.json | sort -u)"
+
+          mapfile -t route_zones < <(awk -F'"' '/^zone_name[[:space:]]*=/ {print $2}' worker-runtime/wrangler.toml | sort -u)
+
+          if [ "${#route_zones[@]}" -eq 0 ]; then
+            echo "No routes declared in worker-runtime/wrangler.toml; nothing to validate."
+            exit 0
+          fi
+
+          for zone_name in "${route_zones[@]}"; do
+            if ! grep -Fxq "${zone_name}" <<< "${active_zones}"; then
+              echo "Route zone '${zone_name}' is not an active zone in this account."
+              echo "Active zones:"
+              echo "${active_zones}" | sed 's/^/  - /'
+              echo "Refusing to deploy: Wrangler would fail on the routes API."
+              exit 1
+            fi
+            echo "Route zone '${zone_name}' is active."
+          done
+
+          echo "All Worker route zones are active."
+
       - name: Verify legacy Pages bindings and current routes
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -99,12 +143,12 @@ jobs:
             echo "Legacy Pages storage bindings match Worker configuration."
           fi
 
-          zone_status="$(curl -sS -o /tmp/zone.json -w '%{http_code}'             "https://api.cloudflare.com/client/v4/zones?name=nua.qzz.io&account.id=${CLOUDFLARE_ACCOUNT_ID}"             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             -H "Content-Type: application/json")"
+          zone_status="$(curl -sS -o /tmp/zone.json -w '%{http_code}'             "https://api.cloudflare.com/client/v4/zones?name=cash.dpdns.org&account.id=${CLOUDFLARE_ACCOUNT_ID}"             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             -H "Content-Type: application/json")"
 
           if [ "${zone_status}" = "200" ]; then
             zone_id="$(jq -r '.result[0].id // empty' /tmp/zone.json)"
             if [ -n "${zone_id}" ]; then
-              echo "Current Worker routes for nua.qzz.io:"
+              echo "Current Worker routes for cash.dpdns.org:"
               routes_status="$(curl -sS -o /tmp/routes.json -w '%{http_code}'                 "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes"                 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"                 -H "Content-Type: application/json")"
               if [ "${routes_status}" = "200" ]; then
                 jq -r '.result[]? | "  - " + (.pattern // "") + " -> " + (.script // "<no script>")' /tmp/routes.json
@@ -112,7 +156,7 @@ jobs:
                 echo "Workers Routes API returned HTTP ${routes_status}; route diagnostics skipped."
               fi
             else
-              echo "Zone nua.qzz.io was not returned; route diagnostics skipped."
+              echo "Zone cash.dpdns.org was not returned; route diagnostics skipped."
             fi
           else
             echo "Zones API returned HTTP ${zone_status}; route diagnostics skipped."

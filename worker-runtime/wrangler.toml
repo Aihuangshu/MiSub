@@ -5,12 +5,12 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 
 [[routes]]
-pattern = "nua.qzz.io/misub"
-zone_name = "nua.qzz.io"
+pattern = "cash.dpdns.org/misub"
+zone_name = "cash.dpdns.org"
 
 [[routes]]
-pattern = "nua.qzz.io/misub/*"
-zone_name = "nua.qzz.io"
+pattern = "cash.dpdns.org/misub/*"
+zone_name = "cash.dpdns.org"
 
 [assets]
 directory = "../dist"
